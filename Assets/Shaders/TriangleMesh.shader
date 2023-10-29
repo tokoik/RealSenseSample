@@ -15,11 +15,11 @@ Shader "Unlit/TriangleMesh" {
 
       #include "UnityCG.cginc"
 
-      struct appdata
-      {
-        float4 vertex : POSITION;
-        float2 uv : TEXCOORD0;
-      };
+      //struct appdata
+      //{
+      //  float4 vertex : POSITION;
+      //  float2 uv : TEXCOORD0;
+      //};
 
       struct v2f
       {
@@ -29,15 +29,24 @@ Shader "Unlit/TriangleMesh" {
 
       sampler2D _MainTex;
       sampler2D _UVMap;
+      float4 _UVMap_TexelSize;
+      StructuredBuffer<float3> _Vertex;
 
-      v2f vert(appdata v)
+      //v2f vert(appdata v)
+      v2f vert(uint vertex_id : SV_VertexID)
       {
+        v2f v;
+        v.vertex = float4(_Vertex[vertex_id], 1.0);
+
         if (all((float3)v.vertex == 0.0))
         {
           v.vertex.w = 0.0;
           return v;
         }
 
+        // UV を vertex_id から求める
+        v.uv = float2(fmod(vertex_id, _UVMap_TexelSize.z) * _UVMap_TexelSize.x,
+          floor(vertex_id * _UVMap_TexelSize.x) * _UVMap_TexelSize.y);
         v.vertex.y = -v.vertex.y;
         v.vertex = UnityObjectToClipPos(v.vertex);
         return v;

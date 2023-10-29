@@ -13,7 +13,10 @@ using System.Linq;
 public class TriangleMeshRenderer : MonoBehaviour
 {
   public RsFrameProvider Source;
-  private Mesh mesh;
+  //private Mesh mesh;
+  private GraphicsBuffer vertexBuffer = null;
+  private GraphicsBuffer indexBuffer = null;
+  private Material material;
   private Texture2D uvmap;
 
   [NonSerialized]
@@ -86,44 +89,56 @@ public class TriangleMeshRenderer : MonoBehaviour
       wrapMode = TextureWrapMode.Clamp,
       filterMode = FilterMode.Point,
     };
-    GetComponent<MeshRenderer>().sharedMaterial.SetTexture("_UVMap", uvmap);
+    //GetComponent<MeshRenderer>().sharedMaterial.SetTexture("_UVMap", uvmap);
+    material = GetComponent<MeshRenderer>().sharedMaterial;
+    material.SetTexture("_UVMap", uvmap);
 
-    if (mesh != null)
-      mesh.Clear();
-    else
-      mesh = new Mesh()
-      {
-        indexFormat = IndexFormat.UInt32,
-      };
+    //if (mesh != null)
+    //  mesh.Clear();
+    //else
+    //  mesh = new Mesh()
+    //  {
+    //    indexFormat = IndexFormat.UInt32,
+    //  };
 
     vertices = new Vector3[width * height];
+    if (vertexBuffer != null)
+      vertexBuffer.Release();
+    vertexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+      vertices.Length, sizeof(float) * 3);
+    material.SetBuffer("_Vertex", vertexBuffer);
 
     //var indices = new int[vertices.Length];
     //for (int i = 0; i < vertices.Length; i++)
     //  indices[i] = i;
     var indices = CreateTriangleMeshIndex(width - 1, height - 1);
+    if (indexBuffer != null)
+      indexBuffer.Release();
+    indexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Index,
+      indices.Length, sizeof(int));
+    indexBuffer.SetData(indices);
 
-    mesh.MarkDynamic();
-    mesh.vertices = vertices;
+    //mesh.MarkDynamic();
+    //mesh.vertices = vertices;
 
-    var uvs = new Vector2[width * height];
-    Array.Clear(uvs, 0, uvs.Length);
-    for (int j = 0; j < height; j++)
-    {
-      for (int i = 0; i < width; i++)
-      {
-        uvs[i + j * width].x = i / (float)width;
-        uvs[i + j * width].y = j / (float)height;
-      }
-    }
+    //var uvs = new Vector2[width * height];
+    //Array.Clear(uvs, 0, uvs.Length);
+    //for (int j = 0; j < height; j++)
+    //{
+    //  for (int i = 0; i < width; i++)
+    //  {
+    //    uvs[i + j * width].x = i / (float)width;
+    //    uvs[i + j * width].y = j / (float)height;
+    //  }
+    //}
 
-    mesh.uv = uvs;
+    //mesh.uv = uvs;
 
-    //mesh.SetIndices(indices, MeshTopology.Points, 0, false);
-    mesh.SetIndices(indices, MeshTopology.Triangles, 0, false);
-    mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 10f);
+    ////mesh.SetIndices(indices, MeshTopology.Points, 0, false);
+    //mesh.SetIndices(indices, MeshTopology.Triangles, 0, false);
+    //mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 10f);
 
-    GetComponent<MeshFilter>().sharedMesh = mesh;
+    //GetComponent<MeshFilter>().sharedMesh = mesh;
   }
 
   void OnDestroy()
@@ -134,8 +149,15 @@ public class TriangleMeshRenderer : MonoBehaviour
       q = null;
     }
 
-    if (mesh != null)
+    //if (mesh != null)
+    //  Destroy(null);
+    if (indexBuffer != null)
+      indexBuffer.Release();
+    if (vertexBuffer != null)
+    {
+      vertexBuffer.Release();
       Destroy(null);
+    }
   }
 
   private void Dispose()
@@ -188,7 +210,8 @@ public class TriangleMeshRenderer : MonoBehaviour
       if (q.PollForFrame<Points>(out points))
         using (points)
         {
-          if (points.Count != mesh.vertexCount)
+          //if (points.Count != mesh.vertexCount)
+          if (points.Count != vertices.Length)
           {
             using (var p = points.GetProfile<VideoStreamProfile>())
               ResetMesh(p.Width, p.Height);
@@ -204,10 +227,20 @@ public class TriangleMeshRenderer : MonoBehaviour
           {
             points.CopyVertices(vertices);
 
-            mesh.vertices = vertices;
-            mesh.UploadMeshData(false);
+            //mesh.vertices = vertices;
+            //mesh.UploadMeshData(false);
+            vertexBuffer.SetData(vertices);
           }
         }
+    }
+  }
+
+  void OnRenderObject()
+  {
+    if (indexBuffer != null)
+    {
+      material.SetPass(0);
+      Graphics.DrawProceduralNow(MeshTopology.Triangles, indexBuffer, indexBuffer.count);
     }
   }
 }
