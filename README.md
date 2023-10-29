@@ -580,3 +580,263 @@ Shader "Unlit/TriangleMesh"
     }
 }
 ```
+
+## Forward Rendering にしてみる
+
+Unity のレンダリングパイプラインは他のゲームエンジンと同様、Deferred Rendering (遅延レンダリング) が標準になっています。Deferred Rendering はディスプレイへの表示を行う通常のフレームバッファに図形を直接描かずに、一旦、画面に表示されないフレームバッファ、いわゆるオフスクリーンバッファに描いた後に、それを使って最終的なレンダリング結果を生成する手法です。このオフスクリーンバッファには通常のフレームバッファが備えるカラーとデプスの他に、用途に応じて様々な用途を組み合わせて格納できるようになっています。
+
+近年のハイクォリティなゲームでは凝ったマテリアルやリアルな照明効果、あるいは複雑な映像効果を実現するのが当たり前になっています。それにはレンダリングの途中経過など、様々な要素を組み合わせる必要があります。そこで、あらかじめオフスクリーンバッファにそういう要素を別々にレンダリングしておき、事後処理により最終的なレンダリング結果を得るようにします。こうすれば高度な映像表現が行えるだけでなく、そういう手間をかけた表現が隠面消去処理によって消されて無駄になってしまうことを避けることができ、レンダリングのパフォーマンスも向上が見込めます。なお、このようなオフスクリーンバッファを *G-バッファ*と言います。これは日本発の技術です (Saito, Takafumi, and Tokiichiro Takahashi. "Comprehensible rendering of 3-D shapes." Proceedings of the 17th annual conference on Computer graphics and interactive techniques. 1990.)。
+
+しかし点群の表示のように、レンダリングプリミティブ数が非常に多いにもかかわらず、それほど高度な映像効果が必要ない場合は、Deferred Rendering のオーバーヘッドが負担になります。その場合はグラフィックス API を使って直接通常のフレームバッファに描いたほうが良い場合もあります。それを Forward Rendering と言います。ちなみに私は Forward Rendering という用語を初めて聞いた時は何か新しい技術課と思ったのですが、意味を知って「え、普通に API で直接描いているだけじゃん」と思いました。ゲームエンジンのパイプラインに組み込んだこと自体が新しかったのかもしれませんけど。
+
+### スクリプトの修正
+
+Game Object の `TriangleMesh` の Mesh Renderer に組み込んだスクリプトの TriangleMeshRenderer を修正します。Mesh Renderer は G-バッファにレンダリングするために使うので、Forward Rendering では使用しません。したがって Mesh Renderer や Mesh Filter は不要なのですが、ここで削除すると手順が増えるので残しておきます。一方 Mesh は使わないので、`TriangleMeshRenderer` クラスからは削除します。代わりに、この Mesh に組み込んでいた頂点やインデックスのデータを保持する `GraphicsBuffer` のメンバ変数 `vertexBuffer` と `indexBuffer` を追加します。また `Material` を保持するメンバ変数 `material` も追加しておきます。
+
+```csharp
+[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
+// public class RsPointCloudRenderer : MonoBehaviour
+public class TriangleMeshRenderer : MonoBehaviour
+{
+  public RsFrameProvider Source;
+  //private Mesh mesh;
+  private GraphicsBuffer vertexBuffer = null;
+  private GraphicsBuffer indexBuffer = null;
+  private Material material = null;
+  private Texture2D uvmap;
+
+```
+
+RealSense に対応したメッシュの出たを作成するメソッド `ResetMesh()` では、Mesh Renderer に組み込んでいた `Material` を、メンバ変数 `material` に保持するようにします。なお、Mesh Renderer を削除した場合は `Resources.Load()` を使って読み込む必要があります。
+
+```csharp
+  private void ResetMesh(int width, int height)
+  {
+    Assert.IsTrue(SystemInfo.SupportsTextureFormat(TextureFormat.RGFloat));
+    uvmap = new Texture2D(width, height, TextureFormat.RGFloat, false, true)
+    {
+      wrapMode = TextureWrapMode.Clamp,
+      filterMode = FilterMode.Point,
+    };
+    //GetComponent<MeshRenderer>().sharedMaterial.SetTexture("_UVMap", uvmap);
+    material = GetComponent<MeshRenderer>().sharedMaterial;
+    material.SetTexture("_UVMap", uvmap);
+
+```
+
+Mesh は使わないので、それに関連するコードは削除します。代わりに、頂点データを格納する `GraphicsBuffer` を `vertexBuffer` に確保します。また、それをシェーダに渡すために `material` にセットします。
+
+```csharp
+    //if (mesh != null)
+    //  mesh.Clear();
+    //else
+    //  mesh = new Mesh()
+    //  {
+    //    indexFormat = IndexFormat.UInt32,
+    //  };
+
+    vertices = new Vector3[width * height];
+    if (vertexBuffer != null)
+      vertexBuffer.Release();
+    vertexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+      vertices.Length, sizeof(float) * 3);
+    material.SetBuffer("_Vertex", vertexBuffer);
+
+```
+
+同様にイデックスデータを格納する `GraphicsBuffer` を `indexBuffer` に確保します。
+
+```csharp
+    //var indices = new int[vertices.Length];
+    //for (int i = 0; i < vertices.Length; i++)
+    //  indices[i] = i;
+    var indices = CreateTriangleMeshIndex(width - 1, height - 1);
+    if (indexBuffer != null)
+      indexBuffer.Release();
+    indexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Index,
+      indices.Length, sizeof(int));
+    indexBuffer.SetData(indices);
+
+```
+
+この後の Mesh に関連するコードは削除します。その結果、テクスチャ座標 UV を渡すことができなくなってしまいますが、これは後で何とかします。
+
+```csharp
+    //mesh.MarkDynamic();
+    //mesh.vertices = vertices;
+
+    //var uvs = new Vector2[width * height];
+    //Array.Clear(uvs, 0, uvs.Length);
+    //for (int j = 0; j < height; j++)
+    //{
+    //  for (int i = 0; i < width; i++)
+    //  {
+    //    uvs[i + j * width].x = i / (float)width;
+    //    uvs[i + j * width].y = j / (float)height;
+    //  }
+    //}
+
+    //mesh.uv = uvs;
+
+    //mesh.SetIndices(indices, MeshTopology.Points, 0, false);
+    //mesh.SetIndices(indices, MeshTopology.Triangles, 0, false);
+    //mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 10f);
+
+    //GetComponent<MeshFilter>().sharedMesh = mesh;
+  }
+```
+
+`OnDestroy()` ではもともと Mesh が作られていたら `Dispose()` が呼ばれていたので、代わりに `indexBuffer` が作られていたら、それを開放するついでに Game Object を `Dispose()` することにします。これでいいんでしょうか。
+
+```csharp
+  void OnDestroy()
+  {
+    if (q != null)
+    {
+      q.Dispose();
+      q = null;
+    }
+
+    //if (mesh != null)
+    //  Destroy(null);
+    if (vertexBuffer != null)
+      vertexBuffer.Release();
+    if (indexBuffer != null)
+    {
+      indexBuffer.Release();
+      Destroy(null);
+    }
+  }
+```
+
+RealSense から頂点データを取り出して Mesh を更新していた `LastUpdate()` では、これまで `points` に取り出した頂点の数が Mesh の頂点の数と比較して違っていたら Mesh を作り直していました。Mesh を使わなくなったので、代わりにこれを (頂点データの一時保管に使う) `vertices` の長さと比較することにします。
+
+```csharp
+  protected void LateUpdate()
+  {
+    if (q != null)
+    {
+      Points points;
+      if (q.PollForFrame<Points>(out points))
+        using (points)
+        {
+          //if (points.Count != mesh.vertexCount)
+          if (points.Count != vertices.Length)
+          {
+              using (var p = points.GetProfile<VideoStreamProfile>())
+              ResetMesh(p.Width, p.Height);
+          }
+
+```
+
+そのあと `points` の頂点データを一時保管用の配列 `vertices` にコピーして Mesh に設定していましたが、これも Mesh の代わりに `GraphicsBuffer` の `vertexBuffer` に格納するようにします。本当は `uvmap` 同様 `points.VertexData` を直接 `vertexBuffer` にコピーしたかったんですけど、`points.VertexData` の先のデータを `vertexBuffer.GetNativeBufferPtr()`　の先にコピーする方法がわかりませんでした (`Marshal.Copy()` を使う？)。
+
+```csharp
+          if (points.TextureData != IntPtr.Zero)
+          {
+            uvmap.LoadRawTextureData(points.TextureData, points.Count * sizeof(float) * 2);
+            uvmap.Apply();
+          }
+
+          if (points.VertexData != IntPtr.Zero)
+          {
+            points.CopyVertices(vertices);
+
+            //mesh.vertices = vertices;
+            //mesh.UploadMeshData(false);
+            vertexBuffer.SetData(vertices);
+          }
+        }
+    }
+  }
+```
+
+最後に `OnRenderObject()` メソッドを追加します。この Game Object の `TriangleMesh` では Mesh Renderer では描画しませんから、`OnRenderObject()` で `Graphics.DrawProceduralNow()` により直接描画します。
+
+```csharp
+  void OnRenderObject()
+  {
+    if (indexBuffer != null)
+    {
+      material.SetPass(0);
+      Graphics.DrawProceduralNow(MeshTopology.Triangles, indexBuffer, indexBuffer.count);
+    }
+  }
+}
+```
+
+### シェーダの修正
+
+ここでは Mesh Renderer を使わず Mesh を削除してしまったので、テクスチャ座標 UV を渡していません。それで「後で何とかします」ということで、シェーダで何とかすることにします。マテリアルの `TriangleMeshMat` に組み込んだシェーダの TriangleMesh を修正します。
+
+バーテックスシェーダ `vert()` に入力する頂点属性には位置 `POSITION` もテクスチャ座標 `TEXCOORD0` も存在しなくなったので、その構造体 `appdata` は削除してしまいます。
+
+```hlsl
+Shader "Unlit/TriangleMesh" {
+  Properties{
+    _MainTex("Texture", 2D) = "white" {}
+    _UVMap("UV", 2D) = "" {}
+  }
+
+    SubShader
+  {
+    Pass
+    {
+      CGPROGRAM
+      #pragma vertex vert
+      #pragma geometry geom
+      #pragma fragment frag
+
+      #include "UnityCG.cginc"
+
+      //struct appdata
+      //{
+      //  float4 vertex : POSITION;
+      //  float2 uv : TEXCOORD0;
+      //};
+
+      struct v2f
+      {
+        float4 vertex : SV_POSITION;
+        float2 uv : TEXCOORD0;
+      };
+
+```
+
+代わりに「本当の」テクスチャ座標 UV が入っている `_UVMap` のテクスチャサイズ `_UVMap_TexelSize` と、`GraphicsBuffer` の　`vertexBuffer` を受け取る `StructuredBuffer` の `_Vertex` を追加します。
+
+```hlsl
+      sampler2D _MainTex;
+      sampler2D _UVMap;
+      float4 _UVMap_TexelSize;
+      StructuredBuffer<float3> _Vertex;
+
+```
+
+そしてバーテックスシェーダ `vert()` では頂点番号 `SV_VertexID` を `vertex_id` として受け取り、それを使って `_Vertex` から頂点の位置を取り出します。こういう風にしたのは、このあと Compute Shader を使ってごにょごにょしたいと思っていることもあるからですね。
+
+```hlsl
+      v2f vert(uint vertex_id : SV_VertexID)
+      {
+        v2f v;
+        v.vertex = float4(_Vertex[vertex_id], 1.0);
+
+```
+
+そして `_UVMap` をサンプリングするためのテクスチャ座標 UV を `vertex_id` と `_UVMap_TexelSize` を使って求めます。
+
+```hlsl
+        if (all((float3)v.vertex == 0.0))
+        {
+          v.vertex.w = 0.0;
+          return v;
+        }
+
+        // UV を vertex_id から求める
+        v.uv = float2(fmod(vertex_id, _UVMap_TexelSize.z) * _UVMap_TexelSize.x,
+          floor(vertex_id * _UVMap_TexelSize.x) * _UVMap_TexelSize.y);
+        v.vertex.y = -v.vertex.y;
+        v.vertex = UnityObjectToClipPos(v.vertex);
+        return v;
+      }
+```
