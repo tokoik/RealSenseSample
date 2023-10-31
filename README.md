@@ -686,7 +686,7 @@ Mesh は使わないので、それに関連するコードは削除します。
   }
 ```
 
-`OnDestroy()` ではもともと Mesh が作られていたら `Dispose()` が呼ばれていたので、代わりに `indexBuffer` が作られていたら、それを開放するついでに Game Object を `Dispose()` することにします。これでいいんでしょうか。
+`OnDestroy()` ではもともと Mesh が作られていたら `Dispose()` が呼ばれていたので、代わりに `vertexBuffer` が作られていたら、それを開放するついでに Game Object を `Dispose()` することにします。これでいいんでしょうか。
 
 ```csharp
   void OnDestroy()
@@ -699,11 +699,11 @@ Mesh は使わないので、それに関連するコードは削除します。
 
     //if (mesh != null)
     //  Destroy(null);
-    if (vertexBuffer != null)
-      vertexBuffer.Release();
     if (indexBuffer != null)
-    {
       indexBuffer.Release();
+    if (vertexBuffer != null)
+    {
+      vertexBuffer.Release();
       Destroy(null);
     }
   }
@@ -840,3 +840,54 @@ Shader "Unlit/TriangleMesh" {
         return v;
       }
 ```
+
+### Mesh Renderer の削除
+
+Mesh Renderer は使わなくなったので、ここで削除します。そのあと Triangle Mesh Renderer から直接マテリアルを参照するようにします。
+
+1. Hierarchy ウィンドウで `TriangleMesh` オブジェクトを選択し、Inspector で Triangle Mesh Renderer (Script) → Mesh Renderer → Mesh Filter の順に削除 (`︙` から Remove Component を選択) してください。
+   * この結果 `TriangleMesh` オブジェクトは Empty になります。
+2. スクリプトの TriangleMeshRenderer を修正します。まず、このスクリプトを組み込んだ時に Mesh Filter と Mesh Renderer が自動的に組み込まれないように、`[RequireComponent ... ]` を削除します。また、このスクリプトから直接マテリアルを参照するために、メンバ変数 `material` を `[SerializeField]` にするか、public にします。
+
+```csharp
+//[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
+//public class RsPointCloudRenderer : MonoBehaviour
+public class TriangleMeshRenderer : MonoBehaviour
+{
+  public RsFrameProvider Source;
+  //private Mesh mesh;
+  private GraphicsBuffer vertexBuffer = null;
+  private GraphicsBuffer indexBuffer = null;
+  [SerializeField]
+  private Material material;
+  private Texture2D uvmap;
+
+  [NonSerialized]
+  private Vector3[] vertices;
+
+  FrameQueue q;
+```
+
+3. マテリアルはこのスクリプトのプロパティで設定しますから、コンポーネントから取り出す必要はありません。
+
+```csharp
+  private void ResetMesh(int width, int height)
+  {
+    Assert.IsTrue(SystemInfo.SupportsTextureFormat(TextureFormat.RGFloat));
+    uvmap = new Texture2D(width, height, TextureFormat.RGFloat, false, true)
+    {
+      wrapMode = TextureWrapMode.Clamp,
+      filterMode = FilterMode.Point,
+    };
+    //GetComponent<MeshRenderer>().sharedMaterial.SetTexture("_UVMap", uvmap);
+    //material = GetComponent<MeshRenderer>().sharedMaterial;
+    material.SetTexture("_UVMap", uvmap);
+
+```
+
+4. この Triangle Mesh Render を Game Object の `TriangleMesh` に追加します。  
+    ![Triangle Mesh の追加](Images/16.png)
+5. Inspector で Triangle Mesh Renderer (Script) の Source に `RsProcessingPipe` を選びます。  
+    ![Source に RsProcessingPipe を選択](Images/22.png)
+6. Material には `TriangleMeshMat` を選びます。  
+    ![Material に TriangleMeshMat を選択](Images/23.png)

@@ -8,7 +8,7 @@ using System.Threading;
 using System.Collections.Generic;
 using System.Linq;
 
-[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
+//[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
 //public class RsPointCloudRenderer : MonoBehaviour
 public class TriangleMeshRenderer : MonoBehaviour
 {
@@ -16,6 +16,7 @@ public class TriangleMeshRenderer : MonoBehaviour
   //private Mesh mesh;
   private GraphicsBuffer vertexBuffer = null;
   private GraphicsBuffer indexBuffer = null;
+  [SerializeField]
   private Material material;
   private Texture2D uvmap;
 
@@ -90,7 +91,7 @@ public class TriangleMeshRenderer : MonoBehaviour
       filterMode = FilterMode.Point,
     };
     //GetComponent<MeshRenderer>().sharedMaterial.SetTexture("_UVMap", uvmap);
-    material = GetComponent<MeshRenderer>().sharedMaterial;
+    //material = GetComponent<MeshRenderer>().sharedMaterial;
     material.SetTexture("_UVMap", uvmap);
 
     //if (mesh != null)
