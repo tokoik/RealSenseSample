@@ -33,8 +33,13 @@ Shader "Unlit/TriangleMesh" {
       StructuredBuffer<float3> _Vertex;
 
       //v2f vert(appdata v)
-      v2f vert(uint vertex_id : SV_VertexID)
+      v2f vert(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID)
       {
+        // vertex_id は 0～3 なので instance_id と組み合わせて実際の頂点番号を求める
+        uint b0 = vertex_id & 1;
+        uint b1 = vertex_id >> 1;
+        vertex_id = instance_id + b1 * _UVMap_TexelSize.z + (b0 ^ b1);
+
         v2f v;
         v.vertex = float4(_Vertex[vertex_id], 1.0);
 

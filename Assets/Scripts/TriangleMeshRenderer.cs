@@ -15,7 +15,8 @@ public class TriangleMeshRenderer : MonoBehaviour
   public RsFrameProvider Source;
   //private Mesh mesh;
   private GraphicsBuffer vertexBuffer = null;
-  private GraphicsBuffer indexBuffer = null;
+  //private GraphicsBuffer indexBuffer = null;
+  private int instances = 0;
   [SerializeField]
   private Material material;
   private Texture2D uvmap;
@@ -112,12 +113,13 @@ public class TriangleMeshRenderer : MonoBehaviour
     //var indices = new int[vertices.Length];
     //for (int i = 0; i < vertices.Length; i++)
     //  indices[i] = i;
-    var indices = CreateTriangleMeshIndex(width - 1, height - 1);
-    if (indexBuffer != null)
-      indexBuffer.Release();
-    indexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Index,
-      indices.Length, sizeof(int));
-    indexBuffer.SetData(indices);
+    //var indices = CreateTriangleMeshIndex(width - 1, height - 1);
+    //if (indexBuffer != null)
+    //  indexBuffer.Release();
+    //indexBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Index,
+    //  indices.Length, sizeof(int));
+    //indexBuffer.SetData(indices);
+    instances = (width - 1) * (height - 1);
 
     //mesh.MarkDynamic();
     //mesh.vertices = vertices;
@@ -152,8 +154,8 @@ public class TriangleMeshRenderer : MonoBehaviour
 
     //if (mesh != null)
     //  Destroy(null);
-    if (indexBuffer != null)
-      indexBuffer.Release();
+    //if (indexBuffer != null)
+    //  indexBuffer.Release();
     if (vertexBuffer != null)
     {
       vertexBuffer.Release();
@@ -238,10 +240,12 @@ public class TriangleMeshRenderer : MonoBehaviour
 
   void OnRenderObject()
   {
-    if (indexBuffer != null)
+    //if (indexBuffer != null)
+    if (instances > 0)
     {
       material.SetPass(0);
-      Graphics.DrawProceduralNow(MeshTopology.Triangles, indexBuffer, indexBuffer.count);
+      //Graphics.DrawProceduralNow(MeshTopology.Triangles, indexBuffer, indexBuffer.count);
+      Graphics.DrawProceduralNow(MeshTopology.Quads, 4, instances);
     }
   }
 }
